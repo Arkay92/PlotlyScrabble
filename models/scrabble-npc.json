@@ -1,0 +1,14 @@
+{
+  "source": "synthetic heuristic teacher",
+  "seed": 42,
+  "epochs": 300,
+  "samples": 12000,
+  "concept_groups": 12000,
+  "held_out_samples": 2400,
+  "nll": 0.41898747879292497,
+  "uniform_nll": 0.42130117929190336,
+  "oracle_nll": 0.35575301924105107,
+  "routing_regret": 0.0632344595518739,
+  "accuracy": 0.8454166666666667,
+  "caveat": "Quality labels are teacher judgments, not measured wins. No playing-strength claim."
+}

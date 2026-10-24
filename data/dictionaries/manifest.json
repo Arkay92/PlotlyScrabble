@@ -1,0 +1,35 @@
+{
+  "version": "ESDB rel-2026.02.25",
+  "downloaded": "2026-10-24",
+  "filter": "lowercase ASCII alphabetic entries, 2 to 15 letters; converted to uppercase for play",
+  "dictionaries": {
+    "en_US": {
+      "file": "en_US.txt",
+      "upstream_file": "en_US.txt",
+      "url": "https://raw.githubusercontent.com/en-wl/wordlist-diff/refs/tags/rel-2026.02.25/en_US.txt",
+      "playable_words": 78812,
+      "sha256": "4ff7e0b6d86763e1e042ffd746e94cdf4432618702deac303a1669e2a838db04"
+    },
+    "en_GB": {
+      "file": "en_GB.txt",
+      "upstream_file": "en_GB-ise.txt",
+      "url": "https://raw.githubusercontent.com/en-wl/wordlist-diff/refs/tags/rel-2026.02.25/en_GB-ise.txt",
+      "playable_words": 78812,
+      "sha256": "82b22843c9958a1efac291e0ea7dbef22ce227dd4e5ca0fd84043cbc62e0a4f1"
+    },
+    "en_CA": {
+      "file": "en_CA.txt",
+      "upstream_file": "en_CA.txt",
+      "url": "https://raw.githubusercontent.com/en-wl/wordlist-diff/refs/tags/rel-2026.02.25/en_CA.txt",
+      "playable_words": 78814,
+      "sha256": "905b1b6b0a98fcb3701c9c59290a090a4d6ab9127809017fefacbe9c2c6f15a4"
+    },
+    "en_AU": {
+      "file": "en_AU.txt",
+      "upstream_file": "en_AU.txt",
+      "url": "https://raw.githubusercontent.com/en-wl/wordlist-diff/refs/tags/rel-2026.02.25/en_AU.txt",
+      "playable_words": 79072,
+      "sha256": "d115ebf51c6dcd819c8624019b762c59e185a5c875b97247e5ad2d3d8efe6c1d"
+    }
+  }
+}
