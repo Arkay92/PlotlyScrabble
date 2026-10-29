@@ -181,11 +181,18 @@ def act(original, action, blank='A', rng=None):
         state.update(pending={},selected=None,exchange=False,exchange_tiles=[])
         return state,'All draft tiles returned to your rack.'
     if kind=='shuffle':
-        if state['pending']:
-            raise ValueError('Recall your tiles before shuffling your rack.')
-        (rng or random.SystemRandom()).shuffle(state['racks'][state['turn']])
+        player_idx = action.get('player_index')
+        turn = player_idx if (player_idx is not None and 0 <= player_idx < len(state['racks'])) else state['turn']
+        used_slots = {t['rack'] for t in state.get('pending', {}).values()} if turn == state['turn'] else set()
+        rack = state['racks'][turn]
+        free_indices = [i for i in range(len(rack)) if i not in used_slots]
+        if len(free_indices) > 1:
+            free_letters = [rack[i] for i in free_indices]
+            (rng or random.SystemRandom()).shuffle(free_letters)
+            for i, letter in zip(free_indices, free_letters):
+                rack[i] = letter
         state['selected'] = None
-        return state,'Rack shuffled.'
+        return state, 'Rack shuffled.'
     if kind=='exchange':
         if len(state['bag'])<7:
             raise ValueError('You need at least seven tiles in the bag to exchange.')
@@ -211,6 +218,11 @@ def act(original, action, blank='A', rng=None):
         state['selected'] = None
         return state,'Tile returned to your rack.'
     if kind=='rack':
+        if (state.get('selected') or '').startswith('cell:'):
+            c_key = state['selected'].split(':')[1]
+            state['pending'].pop(c_key, None)
+            state['selected'] = None
+            return state, 'Tile returned to your rack.'
         slot = int(action['slot'])
         if not 0<=slot<len(state['racks'][state['turn']]):
             raise ValueError('Choose a tile in your rack.')
@@ -230,12 +242,14 @@ def act(original, action, blank='A', rng=None):
     if not 0<=int(target)<225:
         raise ValueError('Place your tile on the board.')
     source = action.get('source') if kind=='drop' else state['selected']
+    if target in state['pending']:
+        # Clicking or dropping on a draft tile recalls it back to the rack
+        state['pending'].pop(target, None)
+        state['selected'] = None
+        return state, 'Tile returned to your rack.'
     if not source:
-        if target in state['pending']:
-            state['selected'] = f'cell:{target}'
-            return state,'Choose another square to move this draft tile.'
         return state,'Choose a tile from your rack first.'
-    if target in state['board'] or target in state['pending']:
+    if target in state['board']:
         raise ValueError('That square already has a tile.')
     source_kind,index = source.split(':')
     if source_kind=='cell':

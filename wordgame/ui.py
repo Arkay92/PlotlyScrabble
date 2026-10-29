@@ -77,7 +77,9 @@ def board_view(state, player_idx=None):
                 'data-cell': key,
                 'data-action': 'cell',
                 'data-source': f'cell:{key}' if draft else '',
-                'data-draggable': str(bool(draft and is_my_turn)).lower()
+                'data-draggable': str(bool(draft and is_my_turn)).lower(),
+                'data-premium': '★' if square == CENTER else premium,
+                'data-rack-slot': str(placed.get('rack', '')) if (placed and draft and isinstance(placed, dict)) else ''
             }
         ))
     return html.Div([
@@ -131,7 +133,7 @@ def rack_view(state, player_idx=None):
         if state.get('selected') == f'rack:{index}' or index in state.get('exchange_tiles', set()):
             classes.append('selected')
         slots.append(html.Button(
-            tile(letter) if index not in used else html.Span('·'),
+            tile(letter),
             id=f'rack-{index}', className=' '.join(classes), type='button',
             **{
                 'aria-label': f'Rack tile {index+1}: {"blank" if letter == "?" else letter}',
@@ -152,7 +154,7 @@ def rack_view(state, player_idx=None):
     return html.Div([
         html.Div([
             html.Div([html.Span(heading_sub, className='eyebrow'), html.Strong(heading_title)]),
-            control('↻  Shuffle', 'shuffle', 'text-button', bool(used) or state.get('exchange') or not is_my_turn)
+            control('↻  Shuffle', 'shuffle', 'text-button', bool(state.get('exchange')), id='shuffle-btn')
         ], className='rack-heading'),
         html.Div(slots, className='rack', role='group', **{'aria-label': 'Your tile rack', 'data-rack-target': 'true'}),
         html.Div([
@@ -211,22 +213,23 @@ def game_view(state, message, player_idx=None):
         mp_info = state.get('mp') or {}
         code = mp_info.get('code', '')
         connected = mp_info.get('connected', False)
+        status_text = 'Connected · Game in progress' if connected else 'Waiting for opponent to join… Share your code or link below!'
         mp_banner = html.Div([
             html.Div([
                 html.Span(className='online-dot' if connected else 'status-dot offline', style={'marginRight': '6px'}),
-                html.Strong(f"Room {code}"),
-                html.Span('Connected' if connected else 'Waiting for player…', className='muted', style={'marginLeft': '8px', 'fontSize': '11px'}),
-            ], style={'display': 'flex', 'alignItems': 'center'}),
+                html.Strong(f"Room {code}", style={'letterSpacing': '1px', 'fontSize': '14px'}),
+                html.Span(status_text, className='muted', style={'marginLeft': '10px', 'fontSize': '11.5px'}),
+            ], style={'display': 'flex', 'alignItems': 'center', 'flexWrap': 'wrap', 'gap': '4px'}),
             html.Div([
-                html.Button('Copy code', id='mp-copy-btn', type='button', className='button quiet',
-                            **{'data-code': code}, style={'padding': '4px 8px', 'fontSize': '10px'}),
-                html.Button('Share link', id='mp-copy-link-btn', type='button', className='button quiet',
-                            **{'data-code': code}, style={'padding': '4px 8px', 'fontSize': '10px'}),
+                html.Button('Copy code', id='mp-copy-btn', type='button', className='button primary' if not connected else 'button quiet',
+                            **{'data-code': code}, style={'padding': '5px 10px', 'fontSize': '11px'}),
+                html.Button('Share link', id='mp-copy-link-btn', type='button', className='button primary' if not connected else 'button quiet',
+                            **{'data-code': code}, style={'padding': '5px 10px', 'fontSize': '11px'}),
                 control('Leave game', 'leave-room', 'button quiet', id='mp-game-leave-btn',
-                        style={'padding': '4px 8px', 'fontSize': '10px', 'color': '#c56a49'}),
-            ], style={'display': 'flex', 'gap': '6px', 'marginLeft': 'auto'})
+                        style={'padding': '5px 10px', 'fontSize': '11px', 'color': '#c56a49'}),
+            ], style={'display': 'flex', 'gap': '8px', 'marginLeft': 'auto', 'alignItems': 'center'})
         ], className='panel mp-session', **{'data-room-code': code},
-           style={'padding': '8px 12px', 'marginBottom': '12px', 'display': 'flex', 'alignItems': 'center'})
+           style={'padding': '12px 16px', 'marginBottom': '14px', 'display': 'flex', 'alignItems': 'center', 'background': '#fdfefb', 'border': '1px solid #dbe2d6'})
 
     mode_badge = 'MULTIPLAYER' if is_mp else ('VS COMPUTER' if state.get('mode') == 'computer' else 'TWO PLAYERS')
 
@@ -304,7 +307,7 @@ def game_view(state, message, player_idx=None):
             html.Span([html.I(className='legend dl'), 'Double letter']),
             html.Span([html.I(className='legend tl'), 'Triple letter'])
         ], className='board-legend'),
-    ], className='current-game')
+    ], id='game-view', className='current-game')
 
 
 def render_recent_games(matches):
@@ -421,21 +424,18 @@ def render_active_games(saved_games, active_id):
             title = f"{mode_label} · #{item.get('local_id', gid[-4:])}"
             sub = f"{'Completed' if is_ended else 'In progress'} · {turn_str}"
 
-        action_el = (
-            html.Span('Active', style={
-                'fontSize': '10px', 'fontWeight': '650', 'padding': '5px 9px',
-                'borderRadius': '5px', 'background': '#e8eee2', 'color': '#52674a',
-            })
-            if is_current else
-            html.Button('Resume →', type='button', className='button secondary',
-                        style={'padding': '5px 10px', 'fontSize': '10px', 'flex': '0'},
-                        **{'data-resume-game': gid})
+        action_el = html.Button(
+            'In game' if is_current else 'Resume →',
+            type='button',
+            className='button primary' if is_current else 'button secondary',
+            style={'padding': '5px 10px', 'fontSize': '10px', 'flex': '0'},
+            **{'data-resume-game': gid}
         )
         rows.append(html.Div([
             html.Div([
                 html.Strong(title, style={'fontSize': '12px', 'display': 'block'}),
                 html.Small(sub, style={'fontSize': '10px', 'color': '#7a827e'}),
-            ], style={'flex': '1', 'minWidth': '0'}),
+            ], style={'flex': '1', 'minWidth': '0', 'cursor': 'pointer'}, **{'data-resume-game': gid}),
             action_el,
             html.Button('✕', type='button', title='Remove from list', className='button quiet',
                         style={'padding': '4px 7px', 'fontSize': '10px'},
@@ -747,7 +747,7 @@ def configure_app(app):
     app.title = 'Letterroom · A word worth playing'
 
     app.layout = html.Main([
-        dcc.Location(id='url'),
+        dcc.Location(id='url', refresh=False),
         dcc.Store(id='session', storage_type='session'),
         dcc.Store(id='action'),
         dcc.Store(id='auth-store', storage_type='local'),
@@ -763,7 +763,8 @@ def configure_app(app):
             html.Button([
                 html.Span(['L', html.Sub('1')], className='brand-tile'),
                 html.Span(['letter', html.Strong('room')])
-            ], id='brand-home-btn', n_clicks=0, type='button', className='brand', title='Return to home'),
+            ], id='brand-home-btn', n_clicks=0, type='button', className='brand', title='Return to home',
+               style={'background': 'none', 'border': '0', 'padding': '0', 'cursor': 'pointer', 'outline': 'none'}),
             html.Span('A word worth playing.', className='brand-note'),
             html.Button([
                 html.Span(className='burger-bar'),
@@ -781,16 +782,18 @@ def configure_app(app):
                 html.Details([
                     html.Summary([
                         html.Span('A', id='header-avatar', className='user-avatar-badge'),
-                        html.Span('Guest', id='user-badge', style={'fontWeight': '600', 'fontSize': '12px', 'color': '#26312f'}),
+                        html.Span('Welcome', id='user-badge', style={'fontWeight': '600', 'fontSize': '12px', 'color': '#26312f'}),
                         html.Span('▾', style={'fontSize': '10px', 'color': '#7a827e'}),
                     ], id='user-avatar-trigger', className='user-avatar-btn'),
                     html.Div([
-                        html.Button('👤  My Profile', id='nav-profile-btn', n_clicks=0, type='button', className='button quiet'),
-                        html.Button('⚡  Why Plotly & About', id='menu-about-btn', n_clicks=0, type='button', className='button quiet'),
+                        html.Button('👤  My Profile', id='nav-profile-btn', n_clicks=0, type='button', className='button quiet',
+                                    style={'width': '100%', 'textAlign': 'left', 'border': '0', 'padding': '8px 10px'}),
+                        html.Button('⚡  Why Plotly & About', id='menu-about-btn', n_clicks=0, type='button', className='button quiet',
+                                    style={'width': '100%', 'textAlign': 'left', 'border': '0', 'padding': '8px 10px'}),
                         html.Button('↪  Switch account', id='auth-logout-btn', n_clicks=0, type='button', className='button quiet',
-                                    style={'color': '#c56a49'}),
+                                    style={'width': '100%', 'textAlign': 'left', 'border': '0', 'padding': '8px 10px', 'color': '#c56a49'}),
                     ], className='user-dropdown-menu'),
-                ], id='user-menu', className='user-dropdown', style={'display': 'none'}),
+                ], id='user-menu', className='user-dropdown', style={'position': 'relative', 'display': 'none'}),
             ], id='site-nav', className='site-nav'),
         ], className='site-header'),
 
@@ -817,7 +820,7 @@ def configure_app(app):
                     html.Button('Register', id='auth-register-btn', n_clicks=0, type='button',
                                 className='button secondary', style={'flex': '1', 'padding': '11px 14px'}),
                 ], style={'display': 'flex', 'gap': '10px'}),
-                html.Div('Enter your details or continue as guest.', id='auth-feedback', role='status',
+                html.Div('Enter your details to log in or register, or play right away as a guest.', id='auth-feedback', role='status',
                          style={'color': '#c56a49', 'fontSize': '11px', 'minHeight': '20px', 'margin': '12px 0'}),
                 html.Div([
                     html.Span(style={'flex': '1', 'height': '1px', 'background': '#e7e8e2'}),
@@ -827,7 +830,7 @@ def configure_app(app):
                 html.Button('Play as guest →', id='auth-guest-btn', n_clicks=0, type='button',
                             className='button quiet', style={'width': '100%', 'padding': '11px 14px', 'fontSize': '12px'}),
             ], className='panel auth-card', style={'maxWidth': '420px', 'width': '100%', 'margin': '48px auto', 'padding': '30px'}),
-        ], id='auth-screen', style={'display': 'none'}),
+        ], id='auth-screen', style={'display': 'flex', 'justifyContent': 'center', 'alignItems': 'center', 'minHeight': '65vh'}),
 
         # Profile Screen
         html.Section([
@@ -1035,8 +1038,7 @@ def configure_app(app):
                 html.P('Regional ESDB word lists for casual play.', className='dictionary-note'),
 
                 html.Div([
-                    html.Div([html.Label('PLAYER ONE', htmlFor='player-one', className='field-label'),
-                              dcc.Input(id='player-one', value='Player 1', maxLength=24)]),
+                    dcc.Input(id='player-one', type='hidden', value=''),
                     html.Div([html.Label('PLAYER TWO', htmlFor='player-two', className='field-label'),
                               dcc.Input(id='player-two', value='Player 2', maxLength=24)], id='second-player-field'),
                 ], className='name-fields'),
@@ -1054,7 +1056,7 @@ def configure_app(app):
                 ], className='card-heading', style={'marginBottom': '10px', 'display': 'flex', 'justifyContent': 'space-between', 'alignItems': 'center'}),
                 html.Div(render_recent_games([]), id='recent-games-feed'),
             ], className='panel recent-games-panel', id='recent-games-panel', style={'gridColumn': '1 / -1', 'marginTop': '20px'}),
-        ], id='home-screen', className='setup-layout'),
+        ], id='home-screen', className='setup-layout', style={'display': 'none'}),
 
         # Active Game View Container
         html.Div(id='game-view-container', style={'display': 'none'}),
@@ -1222,9 +1224,10 @@ def configure_app(app):
 
         trigger = ctx.triggered_id
         action_data = action if trigger == 'action' else {}
-        auth = dict(auth_store or {'role': 'guest', 'username': 'guest', 'display_name': 'Guest', 'avatar': 'A'})
+        auth = dict(auth_store) if auth_store else None
         saved_games = list(saved_games or [])
         screen = active_screen or 'home'
+        print(f"[CALLBACK TRIGGER]: {trigger}, auth={bool(auth)}, screen={screen}")
         subtab = about_subtab or 'tech'
         lobby_tab = mp_tab or 'lobby'
         target_profile = viewed_profile
@@ -1236,56 +1239,107 @@ def configure_app(app):
         mp_choice_mode = 'choice'
         game_message = 'Drag or click tiles to start building a word.'
 
-        # Update last seen if registered user
-        if auth.get('role') == 'user':
+        # 1. URL Room Code Detection
+        code_from_url = extract_code_from_url(url_search, url_pathname)
+        if not auth and code_from_url:
+            auth = DEFAULT_AUTH.guest()
+
+        # Update last seen and refresh profile if registered user
+        if auth and auth.get('role') == 'user':
             try:
+                db_user = DEFAULT_AUTH.get_user(auth.get('username'))
+                if db_user:
+                    auth = {'role': 'user', **db_user}
                 DEFAULT_AUTH.update_last_seen(auth['username'])
             except Exception:
                 pass
 
-        # 1. URL Room Code Detection
-        code_from_url = extract_code_from_url(url_search, url_pathname)
-
         # 2. Authentication Handling
-        if trigger in ('auth-login-btn', 'auth-username', 'auth-password') and auth_user and auth_pass:
-            try:
-                user = DEFAULT_AUTH.login(auth_user, auth_pass)
-                auth = {'role': 'user', **user}
-                screen = 'home'
-            except Exception as e:
-                auth_msg = str(e)
-        elif trigger == 'auth-register-btn' and auth_user and auth_pass:
-            try:
-                user = DEFAULT_AUTH.register(auth_user, auth_pass)
-                auth = {'role': 'user', **user}
-                screen = 'home'
-            except Exception as e:
-                auth_msg = str(e)
+        if trigger in ('auth-login-btn', 'auth-username', 'auth-password'):
+            u = (auth_user or '').strip()
+            p = (auth_pass or '').strip()
+            if not u or not p:
+                auth_msg = 'Please provide both username and password to log in.'
+            else:
+                try:
+                    user = DEFAULT_AUTH.login(u, p)
+                    auth = {'role': 'user', **user}
+                    screen = 'home'
+                    auth_msg = ''
+                except Exception as e:
+                    auth = None
+                    auth_msg = str(e)
+        elif trigger == 'auth-register-btn':
+            u = (auth_user or '').strip()
+            p = (auth_pass or '').strip()
+            if not u or not p:
+                auth_msg = 'Please provide both username and password to register.'
+            else:
+                try:
+                    user = DEFAULT_AUTH.register(u, p)
+                    auth = {'role': 'user', **user}
+                    screen = 'home'
+                    auth_msg = ''
+                except Exception as e:
+                    auth = None
+                    auth_msg = str(e)
         elif trigger == 'auth-guest-btn':
-            auth = {'role': 'guest', 'username': 'guest', 'display_name': 'Guest', 'avatar': 'A'}
+            auth = DEFAULT_AUTH.guest()
             screen = 'home'
+            auth_msg = ''
         elif trigger == 'auth-logout-btn':
-            auth = {'role': 'guest', 'username': 'guest', 'display_name': 'Guest', 'avatar': 'A'}
+            auth = None
             screen = 'auth'
             state = None
+            saved_games = []
+            auth_msg = 'Signed out. Log in, register, or play as guest.'
+
+        # Maintain session auth if user has active game state and auth is not yet set
+        if not auth and state and state.get('auth'):
+            candidate = state.get('auth')
+            if candidate.get('role') == 'user':
+                db_cand = DEFAULT_AUTH.get_user(candidate.get('username'))
+                auth = {'role': 'user', **(db_cand or candidate)}
+            elif candidate.get('role') == 'guest' and trigger not in ('auth-logout-btn', 'brand-home-btn'):
+                auth = candidate
+        if auth and state:
+            state['auth'] = auth
+
+        is_authenticated = bool(auth)
+        if not is_authenticated and screen != 'about':
+            screen = 'auth'
 
         # 3. Screen Navigation
-        if trigger in ('brand-home-btn', 'nav-play-btn'):
-            screen = 'home' if state is None else 'game'
+        if trigger == 'brand-home-btn':
+            screen = 'home' if is_authenticated else 'auth'
+            url_search_out = ''
+        elif trigger == 'nav-play-btn':
+            if not is_authenticated:
+                screen = 'auth'
+            else:
+                screen = 'home' if state is None else 'game'
         elif trigger in ('nav-leaderboard-btn', 'leaderboard-back-btn'):
-            screen = 'home' if trigger == 'leaderboard-back-btn' else 'leaderboard'
+            if not is_authenticated:
+                screen = 'auth'
+            else:
+                screen = 'home' if trigger == 'leaderboard-back-btn' else 'leaderboard'
         elif trigger in ('nav-about-btn', 'footer-about-btn', 'menu-about-btn', 'about-back-btn'):
-            screen = 'home' if trigger == 'about-back-btn' else 'about'
+            if trigger == 'about-back-btn':
+                screen = 'home' if is_authenticated else 'auth'
+            else:
+                screen = 'about'
         elif trigger == 'about-tab-tech-btn':
             subtab = 'tech'
         elif trigger == 'about-tab-why-btn':
             subtab = 'why'
         elif trigger in ('nav-profile-btn', 'profile-back-btn'):
-            if trigger == 'profile-back-btn':
+            if not is_authenticated:
+                screen = 'auth'
+            elif trigger == 'profile-back-btn':
                 screen = 'home' if state is None else 'game'
             else:
                 screen = 'profile'
-                target_profile = auth.get('username')
+                target_profile = auth.get('username') if auth else None
 
         # 4. Action Store Event Handlers (board, profiles, friends, resume/dismiss)
         if action_data:
@@ -1302,12 +1356,24 @@ def configure_app(app):
                         pass
             elif act_type == 'resume-game':
                 gid = action_data.get('game_id', '')
+                screen = 'game'
                 for g in saved_games:
                     if g.get('id') == gid:
-                        state = g.get('state')
-                        screen = 'game'
                         if g.get('mode') == 'multiplayer':
-                            url_search_out = f"?code={g.get('code')}"
+                            c = g.get('code')
+                            tok = g.get('token')
+                            url_search_out = f"?code={c}"
+                            try:
+                                snap = DEFAULT_HUB.get_room_snapshot(c, tok)
+                                if snap:
+                                    state = snap['state']
+                                    state['mp'] = {'code': c, 'token': tok, 'p_idx': snap.get('player_index'), 'connected': snap.get('connected')}
+                                else:
+                                    state = g.get('state')
+                            except Exception:
+                                state = g.get('state')
+                        else:
+                            state = g.get('state')
                         break
             elif act_type == 'dismiss-game':
                 gid = action_data.get('game_id', '')
@@ -1340,6 +1406,7 @@ def configure_app(app):
                     state = new_game(state.get('dictionary', 'en_US'), tuple(state.get('players', ('Player 1', 'Player 2'))), mode=state.get('mode', 'pvp'))
                     game_message = 'A fresh board and new tiles. Your move!'
             elif state:
+                screen = 'game'
                 # Apply in-game board / rack actions
                 try:
                     if state.get('mp'):
@@ -1350,39 +1417,64 @@ def configure_app(app):
                         state = snap['state']
                         state['mp'] = {'code': c, 'token': tok, 'p_idx': snap.get('player_index'), 'connected': snap.get('connected')}
                     else:
-                        if state.get('mode') == 'computer' and state['turn'] == 1 and act_type != 'retry':
+                        if state.get('mode') == 'computer' and state['turn'] == 1 and act_type not in ('retry', 'shuffle'):
                             raise ValueError('It is the computer’s turn.')
-                        state, game_message = act(state, action_data, action_data.get('blank', 'A'))
+                        action_copy = dict(action_data)
+                        if act_type == 'shuffle':
+                            action_copy['player_index'] = p_idx if p_idx is not None else state['turn']
+                        state, game_message = act(state, action_copy, action_data.get('blank', 'A'))
                 except Exception as e:
                     game_message = str(e)
 
         # 5. Profile Management
-        if trigger == 'profile-save-btn' and auth.get('role') == 'user':
+        if trigger == 'profile-save-btn':
+            screen = 'profile'
             try:
-                DEFAULT_AUTH.update_profile(auth['username'], display_name=prof_display_name, avatar=prof_avatar)
-                auth['display_name'] = prof_display_name or auth['username']
-                auth['avatar'] = prof_avatar or 'A'
-                profile_msg = 'Profile changes saved successfully!'
+                if not auth or auth.get('role') != 'user':
+                    auth = {
+                        **(auth or DEFAULT_AUTH.guest()),
+                        'display_name': (prof_display_name or 'Guest').strip() or 'Guest',
+                        'avatar': prof_avatar or 'A',
+                    }
+                    profile_msg = 'Updated guest appearance for this session.'
+                else:
+                    DEFAULT_AUTH.update_profile(auth['username'], display_name=prof_display_name, avatar=prof_avatar)
+                    auth['display_name'] = prof_display_name or auth['username']
+                    auth['avatar'] = prof_avatar or 'A'
+                    profile_msg = 'Profile changes saved successfully!'
             except Exception as e:
                 profile_msg = str(e)
-        elif trigger == 'profile-password-btn' and auth.get('role') == 'user':
+        elif trigger == 'profile-password-btn':
+            screen = 'profile'
             try:
+                if not auth or auth.get('role') != 'user':
+                    raise ValueError('Register an account to set a password.')
                 DEFAULT_AUTH.change_password(auth['username'], prof_curr_pw, prof_new_pw)
                 profile_msg = 'Password updated successfully!'
             except Exception as e:
                 profile_msg = str(e)
-        elif trigger == 'profile-woogles-btn' and auth.get('role') == 'user':
+        elif trigger == 'profile-woogles-btn':
+            screen = 'profile'
             try:
+                if not auth or auth.get('role') != 'user':
+                    raise ValueError('Register or log in to link a Woogles account.')
                 DEFAULT_AUTH.link_woogles(auth['username'], prof_woogles_user)
                 woogles_status = html.Span(f'Linked Woogles account @{prof_woogles_user}', style={'color': '#52674a', 'fontSize': '11px'})
+                profile_msg = f'Linked Woogles account @{prof_woogles_user}'
             except Exception as e:
                 woogles_status = html.Span(str(e), style={'color': '#c56a49', 'fontSize': '11px'})
-        elif trigger == 'profile-isc-btn' and auth.get('role') == 'user':
+                profile_msg = str(e)
+        elif trigger == 'profile-isc-btn':
+            screen = 'profile'
             try:
+                if not auth or auth.get('role') != 'user':
+                    raise ValueError('Register or log in to link an ISC account.')
                 DEFAULT_AUTH.link_isc(auth['username'], prof_isc_user)
                 isc_status = html.Span(f'Linked ISC account @{prof_isc_user}', style={'color': '#52674a', 'fontSize': '11px'})
+                profile_msg = f'Linked ISC account @{prof_isc_user}'
             except Exception as e:
                 isc_status = html.Span(str(e), style={'color': '#c56a49', 'fontSize': '11px'})
+                profile_msg = str(e)
 
         # 6. Multiplayer Lobby Tab and Creation Actions
         if trigger == 'mp-tab-lobby-btn':
@@ -1444,40 +1536,45 @@ def configure_app(app):
             url_search_out = ''
 
         # 7. URL Joining
-        if code_from_url and (state is None or (state.get('mp') or {}).get('code') != code_from_url):
-            try:
-                # Try getting room snapshot with existing token or join
-                existing_g = next((g for g in saved_games if g.get('code') == code_from_url), None)
-                if existing_g:
-                    snap = DEFAULT_HUB.get_room_snapshot(code_from_url, existing_g.get('token'))
-                    if snap:
-                        state = snap['state']
-                        state['mp'] = {'code': code_from_url, 'token': existing_g.get('token'), 'p_idx': snap.get('player_index'), 'connected': snap.get('connected')}
+        if code_from_url and trigger not in ('brand-home-btn', 'mp-leave-btn', 'auth-logout-btn'):
+            if state and (state.get('mp') or {}).get('code') == code_from_url:
+                screen = 'game'
+            elif state is None or (state.get('mp') or {}).get('code') != code_from_url:
+                try:
+                    # Try getting room snapshot with existing token or join
+                    existing_g = next((g for g in saved_games if g.get('code') == code_from_url), None)
+                    if existing_g:
+                        snap = DEFAULT_HUB.get_room_snapshot(code_from_url, existing_g.get('token'))
+                        if snap:
+                            state = snap['state']
+                            state['mp'] = {'code': code_from_url, 'token': existing_g.get('token'), 'p_idx': snap.get('player_index'), 'connected': snap.get('connected')}
+                            screen = 'game'
+                    else:
+                        room, token = DEFAULT_HUB.join_room(
+                            code_from_url,
+                            joiner_user=auth.get('username') if auth.get('role') == 'user' else None,
+                            joiner_name=auth.get('display_name') or 'Player 2',
+                            joiner_avatar=auth.get('avatar', 'E')
+                        )
+                        state = DEFAULT_HUB.get_room_snapshot(code_from_url, token)['state']
+                        state['mp'] = {'code': code_from_url, 'token': token, 'p_idx': 1, 'connected': True}
                         screen = 'game'
-                else:
-                    room, token = DEFAULT_HUB.join_room(
-                        code_from_url,
-                        joiner_user=auth.get('username') if auth.get('role') == 'user' else None,
-                        joiner_name=auth.get('display_name') or 'Player 2',
-                        joiner_avatar=auth.get('avatar', 'E')
-                    )
-                    state = DEFAULT_HUB.get_room_snapshot(code_from_url, token)['state']
-                    state['mp'] = {'code': code_from_url, 'token': token, 'p_idx': 1, 'connected': True}
-                    screen = 'game'
-            except Exception:
-                pass
+                except Exception:
+                    pass
 
         # 8. Start Local Game
         if trigger == 'start' and mode in ('pvp', 'computer'):
             try:
                 if dictionary not in DICTIONARIES:
                     raise ValueError('Choose a dictionary before starting the game.')
-                p1 = player_one or 'Player 1'
+                p1 = player_one or ((auth.get('display_name') or auth.get('username') or 'Guest') if (auth and auth.get('role') == 'user') else 'Guest')
                 p2 = 'Computer' if mode == 'computer' else (player_two or 'Player 2')
                 state = new_game(dictionary, (p1, p2), mode=mode)
 
                 local_id = secrets.token_hex(2).upper()
                 state['local_id'] = local_id
+                if auth:
+                    state['auth'] = auth
                 screen = 'game'
             except Exception as e:
                 game_message = str(e)
@@ -1491,17 +1588,32 @@ def configure_app(app):
                 game_message = str(e)
 
         # 10. Polling updates for Multiplayer & Friends
+        mp_changed = False
         if state and state.get('mp'):
             mp_info = state['mp']
             c = mp_info.get('code')
             tok = mp_info.get('token')
             if c:
-                snap = DEFAULT_HUB.get_room_snapshot(c, tok)
-                if snap:
-                    state = snap['state']
-                    state['mp'] = {'code': c, 'token': tok, 'p_idx': snap.get('player_index'), 'connected': snap.get('connected')}
+                try:
+                    snap = DEFAULT_HUB.get_room_snapshot(c, tok)
+                    if snap:
+                        old_turn = state.get('turn')
+                        old_conn = state['mp'].get('connected')
+                        old_len = len(state.get('history', []))
+                        new_state = snap['state']
+                        new_conn = snap.get('connected')
+                        new_len = len(new_state.get('history', []))
+                        if old_turn != new_state.get('turn') or old_conn != new_conn or old_len != new_len:
+                            mp_changed = True
+                        state = new_state
+                        state['mp'] = {'code': c, 'token': tok, 'p_idx': snap.get('player_index'), 'connected': new_conn}
+                except Exception:
+                    pass
 
-        # 11. Sync Saved Games Store
+        # 11. Screen Reconciliation & Sync Saved Games Store
+        if screen not in ('auth', 'profile', 'leaderboard', 'about', 'home'):
+            screen = 'game' if state is not None else 'home'
+
         if state:
             if state.get('mp'):
                 c = state['mp']['code']
@@ -1574,41 +1686,70 @@ def configure_app(app):
         recent_feed_html = render_recent_games(recent_matches)
 
         # Friends
-        friends_list = DEFAULT_AUTH.get_friends(auth.get('username')) if auth.get('role') == 'user' else []
+        friends_list = DEFAULT_AUTH.get_friends(auth.get('username')) if (auth and auth.get('role') == 'user') else []
         online_count = sum(1 for f in friends_list if f.get('is_online'))
         friends_widget_html = render_friends_widget_content(friends_list, auth)
-        friends_badge_text = f"{online_count} online" if online_count else "Offline"
+        friends_badge_text = f"{online_count} online" if (auth and auth.get('role') == 'user' and online_count) else "Offline"
 
         # Leaderboard
-        lb_entries = DEFAULT_AUTH.get_leaderboard(50) if screen == 'leaderboard' else []
+        lb_entries = DEFAULT_AUTH.get_leaderboard(current_user=auth.get('username') if auth else None, limit=50) if screen == 'leaderboard' else []
         lb_html = render_leaderboard_content(lb_entries, auth) if screen == 'leaderboard' else None
 
         # About
         about_html = render_about_content(subtab) if screen == 'about' else None
 
         # Profile
-        target_u = target_profile or auth.get('username')
-        prof_data = DEFAULT_AUTH.get_user(target_u) if screen == 'profile' else None
-        is_friend = DEFAULT_AUTH.is_friend(auth.get('username'), target_u) if (auth.get('role') == 'user' and prof_data) else False
-        p_disp, p_sub, p_friend_btn, p_stats = render_profile_content(prof_data, auth, is_friend) if prof_data else ('', '', None, None)
-        is_my_profile = (auth.get('role') == 'user' and target_u == auth.get('username'))
-        prof_settings_style = {'display': 'grid', 'gridTemplateColumns': 'repeat(auto-fit, minmax(320px, 1fr))', 'gap': '24px'} if is_my_profile else {'display': 'none'}
+        target_u = target_profile or (auth.get('username') if auth else None)
+        prof_data = DEFAULT_AUTH.get_user(target_u) if (screen == 'profile' and target_u and target_u != 'guest') else None
+        is_my_profile = bool(auth and ((auth.get('role') == 'user' and target_u == auth.get('username')) or (auth.get('role') == 'guest' and target_u in (None, 'guest'))))
+
+        if screen == 'profile':
+            if prof_data:
+                is_friend = DEFAULT_AUTH.is_friend(auth.get('username'), target_u) if (auth and auth.get('role') == 'user') else False
+                p_disp, p_sub, p_friend_btn, p_stats = render_profile_content(prof_data, auth, is_friend)
+                prof_settings_style = {'display': 'grid', 'gridTemplateColumns': 'repeat(auto-fit, minmax(320px, 1fr))', 'gap': '24px'} if is_my_profile else {'display': 'none'}
+            elif is_my_profile and auth:
+                p_disp = auth.get('display_name', 'Guest')
+                p_sub = 'Guest session · Register or log in to record matches on the leaderboard.'
+                p_friend_btn = html.Span('Guest Account', style={'fontSize': '12px', 'fontWeight': '600', 'color': '#4a564e', 'background': '#edf1e8', 'padding': '6px 12px', 'borderRadius': '16px'})
+                p_stats = html.Div('Register an account to record your wins, losses, rating, and global leaderboard rankings.',
+                                   style={'color': '#7a827e', 'fontSize': '12px', 'fontStyle': 'italic', 'margin': '10px 0'})
+                prof_settings_style = {'display': 'grid', 'gridTemplateColumns': 'repeat(auto-fit, minmax(320px, 1fr))', 'gap': '24px'}
+            else:
+                p_disp, p_sub, p_friend_btn, p_stats = 'User not found', '', None, None
+                prof_settings_style = {'display': 'none'}
+        else:
+            p_disp, p_sub, p_friend_btn, p_stats = '', '', None, None
+            prof_settings_style = {'display': 'none'}
 
         # Game View HTML
         p_idx = (state.get('mp') or {}).get('p_idx') if state else None
         game_view_html = game_view(state, game_message, player_idx=p_idx) if state else None
 
         # Styles for screen visibility
-        auth_style = {} if screen == 'auth' else {'display': 'none'}
-        home_style = {} if screen == 'home' else {'display': 'none'}
-        game_style = {} if screen == 'game' else {'display': 'none'}
-        lb_style = {} if screen == 'leaderboard' else {'display': 'none'}
+        auth_style = {'display': 'flex', 'justifyContent': 'center', 'alignItems': 'center', 'minHeight': '65vh'} if (not is_authenticated and screen != 'about') else {'display': 'none'}
+        home_style = {} if (is_authenticated and screen == 'home') else {'display': 'none'}
+        game_style = {} if (is_authenticated and screen == 'game') else {'display': 'none'}
+        lb_style = {} if (is_authenticated and screen == 'leaderboard') else {'display': 'none'}
         about_style = {} if screen == 'about' else {'display': 'none'}
-        profile_style = {} if screen == 'profile' else {'display': 'none'}
+        profile_style = {} if (is_authenticated and screen == 'profile') else {'display': 'none'}
 
-        user_menu_style = {'display': 'block'} if auth.get('role') == 'user' else {'display': 'none'}
-        nav_play_style = {'display': 'inline-block'} if screen != 'home' else {'display': 'none'}
-        nav_lb_style = {'display': 'inline-block'} if screen != 'leaderboard' else {'display': 'none'}
+        user_menu_style = {'position': 'relative', 'display': 'inline-block'} if is_authenticated else {'display': 'none'}
+        nav_play_style = {'display': 'inline-block'} if ((is_authenticated and screen not in ('home', 'auth')) or screen == 'about') else {'display': 'none'}
+        nav_lb_style = {'display': 'inline-block'} if is_authenticated else {'display': 'none'}
+
+        if auth and auth.get('role') == 'user':
+            disp = auth.get('display_name') or auth['username']
+            rank_str = auth.get('rank', 'Wordsmith')
+            rating_num = auth.get('rating', 1000)
+            badge_text = f'{disp} · {rank_str} ({rating_num})'
+        elif is_authenticated:
+            disp = (auth or {}).get('display_name') or 'Guest'
+            badge_text = f'Playing as {disp}'
+        else:
+            badge_text = 'Welcome'
+
+        header_avatar_char = (auth.get('avatar') or 'A') if auth else 'A'
 
         # Setup sub-views
         mp_panel_style = {} if mode == 'multiplayer' else {'display': 'none'}
@@ -1623,11 +1764,17 @@ def configure_app(app):
         setup_feedback = 'Choose Host or Join above for Multiplayer.' if mode == 'multiplayer' else 'Ready when you are.'
         second_player_style = {'display': 'none'} if mode in ('computer', 'multiplayer') else {}
 
+        # Disable mp-poll unless in active multiplayer room or viewing multiplayer lobby
+        poll_disabled = not bool((state and state.get('mp')) or (screen == 'home' and mode == 'multiplayer'))
+
+        if auth and state:
+            state['auth'] = auth
+
         return (
             state, saved_games, auth, url_search_out, screen, target_profile, subtab, lobby_tab,
-            False,  # mp-poll disabled = False
-            auth.get('display_name') or 'Guest',
-            auth.get('avatar') or 'A',
+            poll_disabled,
+            badge_text,
+            header_avatar_char,
             user_menu_style, nav_play_style, nav_lb_style,
             auth_style, auth_msg,
             home_style,
@@ -1637,11 +1784,11 @@ def configure_app(app):
             'button primary' if subtab == 'tech' else 'button quiet',
             'button primary' if subtab == 'why' else 'button quiet',
             profile_style, profile_msg,
-            (prof_data or {}).get('avatar', 'A'),
+            (auth.get('avatar') or 'A') if (auth and is_my_profile) else ((prof_data or {}).get('avatar', 'A')),
             p_disp, p_sub, p_friend_btn, p_stats,
             prof_settings_style,
-            (auth.get('display_name') or '') if is_my_profile else prof_display_name,
-            (auth.get('avatar') or 'A') if is_my_profile else prof_avatar,
+            (auth.get('display_name') or '') if (auth and is_my_profile) else prof_display_name,
+            (auth.get('avatar') or 'A') if (auth and is_my_profile) else prof_avatar,
             woogles_status, isc_status,
             active_games_count_str, active_games_html,
             recent_feed_html,

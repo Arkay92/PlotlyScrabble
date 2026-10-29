@@ -14,7 +14,7 @@
     let suppressSocketUntil = 0;
 
     const actionable = el => el instanceof Element ? el.closest('[data-action]') : null;
-    const isBusy = () => busy || document.querySelector('#game-view[data-busy="true"]');
+    const isBusy = () => busy || document.querySelector('#game-view[data-busy="true"], #game-view-container[data-busy="true"]');
 
     function clearBusy() {
         busy = false;
@@ -22,9 +22,14 @@
             clearTimeout(busyTimer);
             busyTimer = null;
         }
-        document.querySelectorAll('.move-ghost, .drag-ghost').forEach(el => el.remove());
-        document.querySelectorAll('.drag-source').forEach(el => el.classList.remove('drag-source'));
-        document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+        document.getElementById('game-view')?.removeAttribute('data-busy');
+        document.getElementById('game-view-container')?.removeAttribute('data-busy');
+        document.querySelectorAll('.move-ghost').forEach(el => el.remove());
+        if (!gesture?.dragging) {
+            document.querySelectorAll('.drag-ghost').forEach(el => el.remove());
+            document.querySelectorAll('.drag-source').forEach(el => el.classList.remove('drag-source'));
+            document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+        }
         if (queuedAction) {
             const next = queuedAction;
             queuedAction = null;
@@ -34,20 +39,60 @@
 
     function send(action) {
         if (!window.dash_clientside?.set_props || !action) return;
-        const isGameAction = action.type === 'cell' || action.type === 'rack' || action.type === 'drop' || action.type === 'return' || action.type === 'play' || action.type === 'mp-sync';
-        if (isGameAction && isBusy()) {
-            if (action.type !== 'mp-sync') queuedAction = action;
+        const requiresServerLock = action.type === 'play' || action.type === 'pass' || action.type === 'exchange-confirm';
+        if (requiresServerLock && isBusy()) {
+            queuedAction = action;
             return;
         }
-        if (!isGameAction) {
+        if (!requiresServerLock) {
             queuedAction = null;
         }
-        busy = true;
-        if (busyTimer) clearTimeout(busyTimer);
-        busyTimer = setTimeout(clearBusy, 4000);
+        if (requiresServerLock) {
+            busy = true;
+            if (busyTimer) clearTimeout(busyTimer);
+            busyTimer = setTimeout(clearBusy, 800);
+
+            document.getElementById('game-view')?.setAttribute('data-busy', 'true');
+            document.getElementById('game-view-container')?.setAttribute('data-busy', 'true');
+        }
 
         const blank = document.querySelector('#blank-letter')?.value || 'A';
         window.dash_clientside.set_props('action', {data: {...action, blank, nonce: Date.now() + ++sequence}});
+    }
+
+    function shuffleRackAnimation() {
+        const rackEl = document.querySelector('.rack');
+        if (!rackEl) return;
+        const slots = Array.from(rackEl.querySelectorAll('.rack-slot:not(.used)'));
+        if (slots.length <= 1) return;
+
+        const tileContents = slots.map(slot => ({
+            html: slot.innerHTML,
+            ariaLabel: slot.getAttribute('aria-label')
+        }));
+
+        for (let i = tileContents.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            const tmp = tileContents[i];
+            tileContents[i] = tileContents[j];
+            tileContents[j] = tmp;
+        }
+
+        slots.forEach((slot, idx) => {
+            slot.style.transition = 'transform 0.10s cubic-bezier(0.2, 0, 0.2, 1), opacity 0.10s ease';
+            slot.style.transform = 'scale(0.85) translateY(-4px)';
+            slot.style.opacity = '0.65';
+            setTimeout(() => {
+                slot.innerHTML = tileContents[idx].html;
+                if (tileContents[idx].ariaLabel) slot.setAttribute('aria-label', tileContents[idx].ariaLabel);
+                slot.style.transform = 'scale(1.06) translateY(0)';
+                slot.style.opacity = '1';
+                setTimeout(() => {
+                    slot.style.transform = '';
+                    slot.style.transition = '';
+                }, 110);
+            }, 60);
+        });
     }
 
     function animateTileMove(fromEl, toEl) {
@@ -58,29 +103,83 @@
         document.querySelectorAll('.move-ghost, .drag-ghost').forEach(el => el.remove());
 
         const rFrom = fromEl.getBoundingClientRect();
-        const rTo = toEl.getBoundingClientRect();
+
+        // Resolve destination element: if moving to rack, target the specific rack slot!
+        let destEl = toEl;
+        const isToRack = destEl.classList.contains('rack') || destEl.classList.contains('rack-panel') || destEl.hasAttribute('data-rack-target');
+        if (isToRack) {
+            const slotIdx = fromEl.dataset.rackSlot;
+            destEl = (slotIdx !== undefined && slotIdx !== '' && document.getElementById(`rack-${slotIdx}`)) ||
+                     document.querySelector('.rack-slot.used') ||
+                     document.querySelector('.rack-slot') ||
+                     destEl;
+        }
+
+        const rTo = destEl.getBoundingClientRect();
+        // Sizing: never exceed standard tile size (~52px) to prevent stretching across rack
+        const targetW = Math.min(rTo.width, 52);
+        const targetH = Math.min(rTo.height, 52);
 
         const ghost = tile.cloneNode(true);
-        ghost.className = 'move-ghost';
+        ghost.className = tile.className + ' move-ghost';
         ghost.style.width = `${rFrom.width}px`;
+        ghost.style.height = `${rFrom.height}px`;
+        ghost.style.fontSize = window.getComputedStyle(tile).fontSize;
         ghost.style.left = `${rFrom.left + rFrom.width / 2}px`;
         ghost.style.top = `${rFrom.top + rFrom.height / 2}px`;
         document.body.appendChild(ghost);
 
         fromEl.classList.add('drag-source');
 
+        if (fromEl.classList.contains('board-cell')) {
+            // Eager Recall: board cell -> rack slot
+            fromEl.classList.remove('draft');
+            const prem = fromEl.dataset.premium || '';
+            fromEl.innerHTML = `<span class="premium-label">${prem}</span>`;
+            delete fromEl.dataset.source;
+            fromEl.dataset.draggable = 'false';
+            if (destEl.classList.contains('rack-slot') && !destEl.querySelector('.letter-tile')) {
+                destEl.innerHTML = '';
+                destEl.appendChild(tile.cloneNode(true));
+            }
+        } else {
+            // Eager Placement: rack slot -> board cell
+            fromEl.classList.add('used');
+            toEl.classList.add('draft');
+            toEl.dataset.source = `cell:${toEl.dataset.cell}`;
+            toEl.dataset.rackSlot = fromEl.dataset.slot || '';
+            toEl.dataset.draggable = 'true';
+        }
+
         requestAnimationFrame(() => {
-            ghost.style.transition = 'left 0.14s cubic-bezier(0.2, 0, 0.2, 1), top 0.14s cubic-bezier(0.2, 0, 0.2, 1)';
+            ghost.style.transition = 'left 0.11s cubic-bezier(0.2, 0, 0.2, 1), top 0.11s cubic-bezier(0.2, 0, 0.2, 1), width 0.11s ease, height 0.11s ease, opacity 0.11s ease';
             ghost.style.left = `${rTo.left + rTo.width / 2}px`;
             ghost.style.top = `${rTo.top + rTo.height / 2}px`;
+            ghost.style.width = `${targetW}px`;
+            ghost.style.height = `${targetH}px`;
+            if (fromEl.classList.contains('board-cell')) ghost.style.opacity = '0.85';
         });
-        // Pinned until MutationObserver receives new board DOM and calls clearBusy()
+
+        setTimeout(() => {
+            if (!fromEl.classList.contains('board-cell')) {
+                toEl.innerHTML = '';
+                toEl.appendChild(tile.cloneNode(true));
+            } else if (destEl.classList.contains('rack-slot')) {
+                if (!destEl.querySelector('.letter-tile')) {
+                    destEl.innerHTML = '';
+                    destEl.appendChild(tile.cloneNode(true));
+                }
+                destEl.classList.remove('used');
+                destEl.dataset.draggable = 'true';
+            }
+            ghost.remove();
+            fromEl.classList.remove('drag-source');
+        }, 110);
     }
 
     function clearGesture() {
         if (gesture?.scrollFrame) cancelAnimationFrame(gesture.scrollFrame);
         if (gesture?.ghost) gesture.ghost.remove();
-        if (gesture?.source) gesture.source.classList.remove('drag-source');
         document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
         gesture = null;
     }
@@ -176,7 +275,10 @@
     // Pointer Events
     document.addEventListener('pointerdown', event => {
         const source = actionable(event.target);
-        if (!source || source.dataset.draggable !== 'true' || isBusy() || gesture || event.button !== 0 || !event.isPrimary) return;
+        const hasSelectedRack = Boolean(document.querySelector('.rack-slot.selected'));
+        const isPlaceTarget = hasSelectedRack && source?.classList?.contains('board-cell') && !source?.classList?.contains('committed') && !source?.classList?.contains('draft');
+        const isDraggable = source && (source.dataset.draggable === 'true' || source.classList.contains('draft') || isPlaceTarget);
+        if (!source || !isDraggable || isBusy() || gesture || (event.button && event.button !== 0)) return;
         const rect = source.getBoundingClientRect();
         gesture = {
             source,
@@ -202,12 +304,15 @@
             if (tile) {
                 const ghost = tile.cloneNode(true);
                 const rect = gesture.source.getBoundingClientRect();
-                ghost.className = 'drag-ghost';
+                ghost.className = tile.className + ' drag-ghost';
                 ghost.style.width = `${rect.width}px`;
+                ghost.style.height = `${rect.height}px`;
+                ghost.style.fontSize = window.getComputedStyle(tile).fontSize;
                 ghost.style.left = `${event.clientX - gesture.offsetX}px`;
                 ghost.style.top = `${event.clientY - gesture.offsetY}px`;
                 document.body.appendChild(ghost);
                 gesture.ghost = ghost;
+                gesture.tileClass = tile.className;
             }
             gesture.pointerY = event.clientY;
             gesture.scrollFrame = requestAnimationFrame(edgeScroll);
@@ -218,9 +323,15 @@
         gesture.ghost.style.left = `${event.clientX - gesture.offsetX}px`;
         gesture.ghost.style.top = `${event.clientY - gesture.offsetY}px`;
 
-        document.querySelector('.drag-over')?.classList.remove('drag-over');
+        document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
         const target = document.elementFromPoint(event.clientX, event.clientY);
-        target?.closest('.board-cell:not(.committed), [data-rack-target]')?.classList.add('drag-over');
+        const cell = target?.closest('.board-cell');
+        const rackTarget = target?.closest('[data-rack-target], .rack, .rack-panel, .rack-slot');
+        if (cell && !cell.classList.contains('committed') && !cell.classList.contains('draft') && cell !== gesture.source) {
+            cell.classList.add('drag-over');
+        } else if (rackTarget && (gesture.source?.dataset?.source?.startsWith('cell:') || gesture.source?.classList?.contains('draft'))) {
+            rackTarget.classList.add('drag-over');
+        }
     }, {passive: false});
 
     document.addEventListener('pointerup', event => {
@@ -233,6 +344,8 @@
         if (gesture.cancelled) {
             suppressClickUntil = performance.now() + 400;
             suppressedTarget = source;
+            if (ghost) ghost.remove();
+            source.classList.remove('drag-source');
             clearGesture();
             return;
         }
@@ -240,35 +353,105 @@
         if (dragging) {
             const targetEl = document.elementFromPoint(event.clientX, event.clientY);
             const cell = targetEl?.closest('[data-cell]');
-            const rackTarget = targetEl?.closest('[data-rack-target]');
+            const rackTarget = targetEl?.closest('[data-rack-target], .rack, .rack-panel, .rack-slot');
             suppressClickUntil = performance.now() + 400;
             suppressedTarget = source;
 
-            if (cell && cell !== source && !cell.classList.contains('committed')) {
+            const isTargetEmptyCell = cell && !cell.classList.contains('committed') && !cell.classList.contains('draft') && cell !== source;
+
+            if (isTargetEmptyCell) {
+                const rTo = cell.getBoundingClientRect();
+                const tileEl = source.querySelector('.letter-tile');
                 if (ghost) {
-                    const rTo = cell.getBoundingClientRect();
                     gesture.ghost = null;
-                    ghost.className = 'move-ghost';
+                    ghost.className = (gesture.tileClass || 'letter-tile') + ' move-ghost';
                     requestAnimationFrame(() => {
-                        ghost.style.transition = 'left 0.12s cubic-bezier(0.2, 0, 0.2, 1), top 0.12s cubic-bezier(0.2, 0, 0.2, 1)';
+                        ghost.style.transition = 'left 0.10s cubic-bezier(0.2, 0, 0.2, 1), top 0.10s cubic-bezier(0.2, 0, 0.2, 1), width 0.10s ease, height 0.10s ease';
                         ghost.style.left = `${rTo.left + rTo.width / 2}px`;
                         ghost.style.top = `${rTo.top + rTo.height / 2}px`;
+                        ghost.style.width = `${rTo.width * 0.96}px`;
+                        ghost.style.height = `${rTo.height * 0.95}px`;
                     });
+                    setTimeout(() => {
+                        if (tileEl) {
+                            cell.innerHTML = '';
+                            cell.appendChild(tileEl.cloneNode(true));
+                        }
+                        ghost.remove();
+                    }, 110);
+                } else if (tileEl) {
+                    cell.innerHTML = '';
+                    cell.appendChild(tileEl.cloneNode(true));
                 }
+                // Eagerly place: mark source as used and cell as draft immediately like chess
+                source.classList.add('used');
+                cell.classList.add('draft');
+                cell.dataset.source = `cell:${cell.dataset.cell}`;
+                cell.dataset.rackSlot = source.dataset.slot || '';
+                cell.dataset.draggable = 'true';
                 clearGesture();
                 send({type: 'drop', cell: Number(cell.dataset.cell), source: source.dataset.source});
-            } else if (rackTarget && source.dataset.source?.startsWith('cell:')) {
+            } else if (rackTarget && (source.dataset.source?.startsWith('cell:') || source.classList.contains('draft') || source.dataset.cell !== undefined)) {
+                // Dragged draft tile back to rack: animate return and recall tile
+                const slotIdx = source.dataset.rackSlot;
+                const destSlot = (slotIdx !== undefined && slotIdx !== '' && document.getElementById(`rack-${slotIdx}`)) ||
+                                 (targetEl?.closest('.rack-slot')) ||
+                                 document.querySelector('.rack-slot.used') ||
+                                 document.querySelector('.rack-slot') ||
+                                 rackTarget;
+                const rRack = destSlot.getBoundingClientRect();
+                const targetW = Math.min(rRack.width, 52);
+                const targetH = Math.min(rRack.height, 52);
+
                 if (ghost) {
                     gesture.ghost = null;
-                    ghost.remove();
+                    ghost.className = (gesture.tileClass || 'letter-tile') + ' move-ghost';
+                    requestAnimationFrame(() => {
+                        ghost.style.transition = 'left 0.11s cubic-bezier(0.2, 0, 0.2, 1), top 0.11s cubic-bezier(0.2, 0, 0.2, 1), width 0.11s ease, height 0.11s ease, opacity 0.11s ease';
+                        ghost.style.left = `${rRack.left + rRack.width / 2}px`;
+                        ghost.style.top = `${rRack.top + rRack.height / 2}px`;
+                        ghost.style.width = `${targetW}px`;
+                        ghost.style.height = `${targetH}px`;
+                        ghost.style.opacity = '0.85';
+                    });
+                    setTimeout(() => {
+                        ghost.remove();
+                        if (destSlot.classList.contains('rack-slot')) {
+                            if (!destSlot.querySelector('.letter-tile')) {
+                                const tileEl = source.querySelector('.letter-tile');
+                                if (tileEl) {
+                                    destSlot.innerHTML = '';
+                                    destSlot.appendChild(tileEl.cloneNode(true));
+                                }
+                            }
+                            destSlot.classList.remove('used');
+                            destSlot.dataset.draggable = 'true';
+                        }
+                    }, 110);
+                } else if (destSlot.classList.contains('rack-slot')) {
+                    if (!destSlot.querySelector('.letter-tile')) {
+                        const tileEl = source.querySelector('.letter-tile');
+                        if (tileEl) {
+                            destSlot.innerHTML = '';
+                            destSlot.appendChild(tileEl.cloneNode(true));
+                        }
+                    }
+                    destSlot.classList.remove('used');
+                    destSlot.dataset.draggable = 'true';
                 }
+                source.classList.remove('draft');
+                const prem = source.dataset.premium || '';
+                source.innerHTML = `<span class="premium-label">${prem}</span>`;
+                delete source.dataset.source;
+                source.dataset.draggable = 'false';
                 clearGesture();
                 send({type: 'return', cell: Number(source.dataset.cell)});
             } else {
+                // Illegal drop (e.g. dropped on committed/draft cell, or outside board): snap back to source
                 if (ghost) {
                     const rFrom = source.getBoundingClientRect();
                     gesture.ghost = null;
-                    ghost.className = 'move-ghost';
+                    ghost.className = (gesture.tileClass || 'letter-tile') + ' move-ghost';
                     requestAnimationFrame(() => {
                         ghost.style.transition = 'left 0.14s cubic-bezier(0.2, 0, 0.2, 1), top 0.14s cubic-bezier(0.2, 0, 0.2, 1)';
                         ghost.style.left = `${rFrom.left + rFrom.width / 2}px`;
@@ -278,6 +461,8 @@
                         ghost.remove();
                         source.classList.remove('drag-source');
                     }, 160);
+                } else {
+                    source.classList.remove('drag-source');
                 }
                 clearGesture();
             }
@@ -288,14 +473,39 @@
                 suppressClickUntil = performance.now() + 400;
                 suppressedTarget = source;
 
-                // Check tap-to-place: selected rack slot -> empty board cell
+                // Recall individual draft tile back to rack on click!
+                if (source.classList.contains('board-cell') && source.classList.contains('draft')) {
+                    const rackEl = document.querySelector('.rack');
+                    if (rackEl) animateTileMove(source, rackEl);
+                    send({type: 'return', cell: Number(source.dataset.cell)});
+                    return;
+                }
+                suppressedTarget = source;
+
+                // Tap-to-place: selected rack slot -> empty board cell
                 const selectedRackSlot = document.querySelector('.rack-slot.selected');
                 if (selectedRackSlot && source.classList.contains('board-cell') && !source.classList.contains('committed') && !source.classList.contains('draft')) {
                     animateTileMove(selectedRackSlot, source);
+                    selectedRackSlot.classList.remove('selected');
+                    selectedRackSlot.setAttribute('aria-pressed', 'false');
                     send({type: 'drop', cell: Number(source.dataset.cell), source: selectedRackSlot.dataset.source});
                     return;
                 }
 
+                // Selecting a rack slot
+                if (source.classList.contains('rack-slot') && !source.classList.contains('used')) {
+                    const wasSelected = source.classList.contains('selected');
+                    document.querySelectorAll('.rack-slot.selected').forEach(s => {
+                        s.classList.remove('selected');
+                        s.setAttribute('aria-pressed', 'false');
+                    });
+                    if (!wasSelected) {
+                        source.classList.add('selected');
+                        source.setAttribute('aria-pressed', 'true');
+                    }
+                }
+
+                // Normal click action
                 const action = {type: source.dataset.action};
                 if (source.dataset.cell !== undefined) action.cell = Number(source.dataset.cell);
                 if (source.dataset.slot !== undefined) action.slot = Number(source.dataset.slot);
@@ -360,11 +570,7 @@
         if (screenNavBtn) {
             queuedAction = null;
             suppressSocketUntil = performance.now() + 1500;
-            document.querySelector('.mp-session')?.removeAttribute('data-room-code');
             closeSocket();
-            if (window.location.search && window.history?.replaceState) {
-                window.history.replaceState(null, '', window.location.pathname);
-            }
             return;
         }
 
@@ -374,10 +580,6 @@
             const gid = resumeBtn.dataset.resumeGame || '';
             if (gid.startsWith('mp:')) {
                 suppressSocketUntil = 0;
-                const code = gid.slice(3);
-                if (code && window.history?.replaceState) {
-                    window.history.replaceState(null, '', `${window.location.pathname}?code=${encodeURIComponent(code)}`);
-                }
             }
             send({type: 'resume-game', game_id: gid});
             return;
@@ -435,6 +637,43 @@
             return;
         }
 
+        // Recall individual draft tile back to rack on click!
+        if (actionEl.classList.contains('board-cell') && actionEl.classList.contains('draft')) {
+            const rackEl = document.querySelector('.rack');
+            if (rackEl) animateTileMove(actionEl, rackEl);
+            send({type: 'return', cell: Number(actionEl.dataset.cell)});
+            return;
+        }
+
+        // Tap-to-place: selected rack slot -> empty board cell
+        const selectedRackSlot = document.querySelector('.rack-slot.selected');
+        if (selectedRackSlot && actionEl.classList.contains('board-cell') && !actionEl.classList.contains('committed') && !actionEl.classList.contains('draft')) {
+            animateTileMove(selectedRackSlot, actionEl);
+            selectedRackSlot.classList.remove('selected');
+            selectedRackSlot.setAttribute('aria-pressed', 'false');
+            send({type: 'drop', cell: Number(actionEl.dataset.cell), source: selectedRackSlot.dataset.source});
+            return;
+        }
+
+        // Selecting a rack slot on click
+        if (actionEl.classList.contains('rack-slot') && !actionEl.classList.contains('used')) {
+            const wasSelected = actionEl.classList.contains('selected');
+            document.querySelectorAll('.rack-slot.selected').forEach(s => {
+                s.classList.remove('selected');
+                s.setAttribute('aria-pressed', 'false');
+            });
+            if (!wasSelected) {
+                actionEl.classList.add('selected');
+                actionEl.setAttribute('aria-pressed', 'true');
+            }
+        }
+
+        if (actionEl.dataset.action === 'shuffle') {
+            shuffleRackAnimation();
+            send({type: 'shuffle'});
+            return;
+        }
+
         const action = {type: actionEl.dataset.action};
         if (actionEl.dataset.cell !== undefined) action.cell = Number(actionEl.dataset.cell);
         if (actionEl.dataset.slot !== undefined) action.slot = Number(actionEl.dataset.slot);
@@ -471,7 +710,18 @@
         let domChanged = false;
         for (const record of records) {
             const t = record.target;
-            if (t && (t.id === 'game-view' || t.classList?.contains('board-frame') || t.closest?.('#game-view'))) {
+            if (!t) continue;
+            if (
+                t.id === 'game-view' ||
+                t.id === 'game-view-container' ||
+                t.classList?.contains('board-frame') ||
+                t.classList?.contains('board-shell') ||
+                t.classList?.contains('scrabble-grid') ||
+                t.classList?.contains('rack') ||
+                t.classList?.contains('rack-panel') ||
+                t.classList?.contains('play-area') ||
+                (typeof t.closest === 'function' && t.closest('#game-view, #game-view-container'))
+            ) {
                 domChanged = true;
                 break;
             }
@@ -484,7 +734,7 @@
     observer.observe(document.documentElement, {
         attributes: true,
         childList: true,
-        attributeFilter: ['data-busy', 'data-room-code', 'data-mp-version'],
+        attributeFilter: ['data-busy', 'data-room-code', 'data-mp-version', 'data-sync-version'],
         subtree: true
     });
 })();

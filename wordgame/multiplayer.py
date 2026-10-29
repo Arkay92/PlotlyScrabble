@@ -321,12 +321,16 @@ class ScrabbleMultiplayerHub:
                 raise ValueError('Waiting for your opponent to join before moves can be played.')
             if room['state']['finished']:
                 raise ValueError('This game has already finished.')
-            if player_idx != room['state']['turn']:
+            act_type = action.get('type')
+            if player_idx != room['state']['turn'] and act_type != 'shuffle':
                 current_player_name = room['state']['players'][room['state']['turn']]
                 raise ValueError(f"Wait for {current_player_name} to complete their turn.")
 
+            action_copy = dict(action)
+            action_copy['player_index'] = player_idx
+
             # Execute move using pure rules
-            new_state, msg = act(room['state'], action, blank=blank)
+            new_state, msg = act(room['state'], action_copy, blank=blank)
             new_state['handoff'] = False
             room['state'] = new_state
 

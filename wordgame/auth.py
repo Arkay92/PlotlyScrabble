@@ -47,8 +47,12 @@ class UserStore:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(str(self.db_path), timeout=15.0)
         conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode = WAL")
-        conn.execute("PRAGMA synchronous = NORMAL")
+        try:
+            conn.execute("PRAGMA journal_mode = DELETE")
+            conn.execute("PRAGMA busy_timeout = 10000")
+            conn.execute("PRAGMA synchronous = NORMAL")
+        except sqlite3.DatabaseError:
+            pass
         return conn
 
     def _init_db(self):
@@ -309,6 +313,9 @@ class UserStore:
             """, (new_rating, wins, losses, draws, games, high, time.time(), u))
 
     def get_leaderboard(self, current_user: str | None = None, limit: int = 50) -> list[dict]:
+        if isinstance(current_user, int):
+            limit = current_user
+            current_user = None
         with self._get_connection() as conn:
             rows = conn.execute("""
                 SELECT username, display_name, avatar, rating, wins, losses, draws, games, high_score, last_seen

@@ -186,13 +186,46 @@ def test_auth_and_navigation():
     configure_app(app)
     client = app.server.test_client()
     output, config = next(iter(app.callback_map.items()))
+    outputs_def = [{'id': o.component_id, 'property': o.component_property} for o in config['output']]
 
-    # Leaderboard navigation
-    inputs = _make_inputs(nav_lb_clicks=1)
-    states = _make_state()
+    # 1. Fresh unauthenticated visit shows auth screen and hides user menu
+    inputs = _make_inputs()
+    states = _make_state(auth_data={})
+    # Passing empty auth_data dict will trigger unauthenticated state
+    states[2]['value'] = None
     res = client.post('/_dash-update-component', json={
         'output': output,
-        'outputs': [{'id': o.component_id, 'property': o.component_property} for o in config['output']],
+        'outputs': outputs_def,
+        'inputs': inputs,
+        'state': states,
+        'changedPropIds': []
+    }).get_json()['response']
+    assert res['auth-screen']['style']['display'] == 'flex'
+    assert res['home-screen']['style']['display'] == 'none'
+    assert res['user-menu']['style']['display'] == 'none'
+    assert res['user-badge']['children'] == 'Welcome'
+
+    # 2. Click "Play as guest →"
+    inputs = _make_inputs(guest_clicks=1)
+    res = client.post('/_dash-update-component', json={
+        'output': output,
+        'outputs': outputs_def,
+        'inputs': inputs,
+        'state': states,
+        'changedPropIds': ['auth-guest-btn.n_clicks']
+    }).get_json()['response']
+    assert res['auth-store']['data']['role'] == 'guest'
+    assert res['user-badge']['children'] == 'Playing as Guest'
+    assert res['user-menu']['style']['display'] == 'inline-block'
+    assert res['home-screen']['style'] == {}
+    assert res['auth-screen']['style']['display'] == 'none'
+
+    # 3. Leaderboard navigation as authenticated user
+    inputs = _make_inputs(nav_lb_clicks=1)
+    states = _make_state(auth_data=res['auth-store']['data'])
+    res = client.post('/_dash-update-component', json={
+        'output': output,
+        'outputs': outputs_def,
         'inputs': inputs,
         'state': states,
         'changedPropIds': ['nav-leaderboard-btn.n_clicks']
@@ -200,14 +233,106 @@ def test_auth_and_navigation():
     assert res['active-screen']['data'] == 'leaderboard'
     assert res['leaderboard-screen']['style'] == {}
 
-    # About navigation and tab switching
+    # 4. About navigation and tab switching
     inputs = _make_inputs(about_why_clicks=1)
     states = _make_state(screen='about')
     res = client.post('/_dash-update-component', json={
         'output': output,
-        'outputs': [{'id': o.component_id, 'property': o.component_property} for o in config['output']],
+        'outputs': outputs_def,
         'inputs': inputs,
         'state': states,
         'changedPropIds': ['about-tab-why-btn.n_clicks']
     }).get_json()['response']
     assert res['about-subtab']['data'] == 'why'
+
+    # 5. Click "Switch account" (logout)
+    inputs = _make_inputs(logout_clicks=1)
+    states = _make_state()
+    res = client.post('/_dash-update-component', json={
+        'output': output,
+        'outputs': outputs_def,
+        'inputs': inputs,
+        'state': states,
+        'changedPropIds': ['auth-logout-btn.n_clicks']
+    }).get_json()['response']
+    assert res['auth-store']['data'] is None
+    assert res['auth-screen']['style']['display'] == 'flex'
+    assert res['home-screen']['style']['display'] == 'none'
+    assert res['user-menu']['style']['display'] == 'none'
+    assert 'Signed out' in res['auth-feedback']['children']
+
+    # 6. Register a new user
+    import time
+    test_user = f'user_{int(time.time()*1000)}'
+    inputs = _make_inputs(register_clicks=1)
+    states = _make_state(auth_data={}, auth_user=test_user, auth_pass='pass1234')
+    states[2]['value'] = None
+    res = client.post('/_dash-update-component', json={
+        'output': output,
+        'outputs': outputs_def,
+        'inputs': inputs,
+        'state': states,
+        'changedPropIds': ['auth-register-btn.n_clicks']
+    }).get_json()['response']
+    assert res['auth-store']['data']['role'] == 'user'
+    assert res['auth-store']['data']['username'] == test_user
+    assert test_user in res['user-badge']['children']
+    assert res['user-menu']['style']['display'] == 'inline-block'
+    assert res['home-screen']['style'] == {}
+
+    # 7. Log out and log back in with test_user
+    inputs = _make_inputs(logout_clicks=2)
+    states = _make_state(auth_data=res['auth-store']['data'])
+    res = client.post('/_dash-update-component', json={
+        'output': output,
+        'outputs': outputs_def,
+        'inputs': inputs,
+        'state': states,
+        'changedPropIds': ['auth-logout-btn.n_clicks']
+    }).get_json()['response']
+    assert res['auth-store']['data'] is None
+    assert res['auth-screen']['style']['display'] == 'flex'
+
+    inputs = _make_inputs(login_clicks=1)
+    states = _make_state(auth_data={}, auth_user=test_user, auth_pass='pass1234')
+    states[2]['value'] = None
+    res = client.post('/_dash-update-component', json={
+        'output': output,
+        'outputs': outputs_def,
+        'inputs': inputs,
+        'state': states,
+        'changedPropIds': ['auth-login-btn.n_clicks']
+    }).get_json()['response']
+    assert res['auth-store']['data']['username'] == test_user
+    assert res['home-screen']['style'] == {}
+    assert res['user-menu']['style']['display'] == 'inline-block'
+
+    # 8. Start a local game as logged in user - ensure auth is preserved
+    logged_in_auth = res['auth-store']['data']
+    inputs = _make_inputs(start_clicks=1, mode='computer', dictionary='en_US')
+    states = _make_state(screen='home', auth_data=logged_in_auth, p1='')
+    res = client.post('/_dash-update-component', json={
+        'output': output,
+        'outputs': outputs_def,
+        'inputs': inputs,
+        'state': states,
+        'changedPropIds': ['start.n_clicks']
+    }).get_json()['response']
+    assert res['auth-store']['data']['role'] == 'user'
+    assert res['auth-store']['data']['username'] == test_user
+    assert res['session']['data']['auth']['username'] == test_user
+    assert res['session']['data']['players'][0] == test_user
+
+    # 9. Return home - ensure user remains logged in (never reverts to guest)
+    inputs = _make_inputs(brand_clicks=1)
+    states = _make_state(session_data=res['session']['data'], screen='game', auth_data=logged_in_auth)
+    res = client.post('/_dash-update-component', json={
+        'output': output,
+        'outputs': outputs_def,
+        'inputs': inputs,
+        'state': states,
+        'changedPropIds': ['brand-home-btn.n_clicks']
+    }).get_json()['response']
+    assert res['auth-store']['data']['role'] == 'user'
+    assert res['auth-store']['data']['username'] == test_user
+    assert test_user in res['user-badge']['children']
